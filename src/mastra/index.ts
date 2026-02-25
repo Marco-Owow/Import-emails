@@ -2,23 +2,39 @@ import { Observability, DefaultExporter, CloudExporter, SensitiveDataFilter } fr
 import { Mastra } from '@mastra/core/mastra';
 import { PinoLogger } from '@mastra/loggers';
 import { LibSQLStore } from '@mastra/libsql';
+import { PostgresStore } from '@mastra/pg';
 import { csvToQuestionsWorkflow } from './workflows/csv-to-questions-workflow';
+import { ingestWorkflow } from './workflows/ingest-workflow';
+import { parseWorkflow } from './workflows/parse-workflow';
 import { textQuestionAgent } from './agents/text-question-agent';
 import { csvQuestionAgent } from './agents/csv-question-agent';
 import { csvSummarizationAgent } from './agents/csv-summarization-agent';
+import { pdfAgent } from './agents/pdf-agent';
+
+// Use PostgresStore when DATABASE_URL is set, otherwise fall back to LibSQL for dev/demo
+const storage = process.env.DATABASE_URL
+  ? new PostgresStore({
+      id: 'mastra-storage',
+      connectionString: process.env.DATABASE_URL,
+    })
+  : new LibSQLStore({
+      id: 'mastra-storage',
+      url: ':memory:',
+    });
 
 export const mastra = new Mastra({
-  workflows: { csvToQuestionsWorkflow },
+  workflows: {
+    csvToQuestionsWorkflow,
+    ingestWorkflow,
+    parseWorkflow,
+  },
   agents: {
     textQuestionAgent,
     csvQuestionAgent,
     csvSummarizationAgent,
+    pdfAgent,
   },
-  storage: new LibSQLStore({
-    id: 'mastra-storage',
-    // stores observability, evals, ... into memory storage, if it needs to persist, change to file:../mastra.db
-    url: ':memory:',
-  }),
+  storage,
   logger: new PinoLogger({
     name: 'Mastra',
     level: 'info',
@@ -28,11 +44,11 @@ export const mastra = new Mastra({
       default: {
         serviceName: 'mastra',
         exporters: [
-          new DefaultExporter(), // Persists traces to storage for Mastra Studio
-          new CloudExporter(), // Sends traces to Mastra Cloud (if MASTRA_CLOUD_ACCESS_TOKEN is set)
+          new DefaultExporter(),
+          new CloudExporter(),
         ],
         spanOutputProcessors: [
-          new SensitiveDataFilter(), // Redacts sensitive data like passwords, tokens, keys
+          new SensitiveDataFilter(),
         ],
       },
     },
