@@ -1,5 +1,5 @@
 {
-  "name": "template-csv-to-questions",
+  "name": "ormi-ordermind",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
@@ -7,28 +7,21 @@
     "dev": "mastra dev",
     "build": "mastra build",
     "start": "mastra start",
-    "seed": "bun run src/lib/seed",
-    "client": "npx tsx src/client.ts",
-    "pdf-client": "npx tsx src/pdf-client.ts",
-    "pdf-chat": "npx tsx src/pdf-client.ts --interactive",
     "db:migrate": "npx tsx src/mastra/db/migrate.ts"
   },
   "keywords": [],
   "author": "",
   "license": "Apache-2.0",
-  "description": "A Mastra template that processes CSV files from URLs and generates comprehensive questions from their content using OpenAI GPT-4o. Features smart CSV parsing, data analysis, and CSV-specific question generation for tabular data insights.",
+  "description": "ORMI-Ordermind: AI-powered order management pipeline that ingests emails, parses attachments, and extracts structured order data.",
   "type": "module",
   "engines": {
     "node": ">=22.13.0"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^1.0.0",
     "@azure/identity": "^4.13.0",
-    "@composio/core": "^0.6.3",
-    "@mastra/client-js": "^1.6.0",
     "@mastra/core": "latest",
-    "@mastra/libsql": "latest",
     "@mastra/loggers": "latest",
-    "@mastra/mcp": "^1.0.1",
     "@mastra/memory": "latest",
     "@mastra/observability": "latest",
     "@mastra/pg": "^1.6.0",
@@ -42,7 +35,6 @@
   "devDependencies": {
     "@types/node": "22.19.7",
     "@types/pg": "^8.16.0",
-    "bun": "^1.3.5",
     "mastra": "latest",
     "typescript": "^5.9.3"
   }

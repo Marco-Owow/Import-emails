@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { extractionResultSchema } from './extraction-config';
 
 export const orderStatusEnum = z.enum([
   'new',
@@ -24,7 +25,7 @@ export const orderSchema = z.object({
   orderType: z.string().optional(),
   clientId: z.string().optional(),
   evidencePackId: z.string().uuid().optional(),
-  extractedFields: z.record(z.string(), z.unknown()).optional(),
+  extractedFields: extractionResultSchema.optional(),
   validationResults: z.record(z.string(), z.unknown()).optional(),
   userEdits: z.record(z.string(), z.unknown()).optional(),
   erpPayload: z.record(z.string(), z.unknown()).optional(),
