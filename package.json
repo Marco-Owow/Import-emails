@@ -7,7 +7,8 @@
     "dev": "mastra dev",
     "build": "mastra build",
     "start": "mastra start",
-    "db:migrate": "npx tsx src/mastra/db/migrate.ts"
+    "db:migrate": "npx tsx src/mastra/db/migrate.ts",
+    "extract-ui": "npx tsx src/extract-ui.ts"
   },
   "keywords": [],
   "author": "",
@@ -18,7 +19,7 @@
     "node": ">=22.13.0"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^1.0.0",
+    "@ai-sdk/openai": "^3.0.33",
     "@azure/identity": "^4.13.0",
     "@mastra/core": "latest",
     "@mastra/loggers": "latest",

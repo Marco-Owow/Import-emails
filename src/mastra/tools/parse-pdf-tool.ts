@@ -1,7 +1,9 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import fs from 'fs';
-import pdfParse from 'pdf-parse';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const pdfParse = require('pdf-parse');
 import { query } from '../db/client';
 import { pdfPageSchema } from '../schemas';
 

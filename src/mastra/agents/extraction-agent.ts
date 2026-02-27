@@ -2,6 +2,7 @@ import { Agent } from '@mastra/core/agent';
 import { openai } from '@ai-sdk/openai';
 
 export const extractionAgent = new Agent({
+  id: 'extraction-agent',
   name: 'Extraction Agent',
   model: openai('gpt-4o'),
   instructions: `You are a structured data extraction agent for the ORMI-Ordermind order management system.
