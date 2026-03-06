@@ -1,61 +1,84 @@
 import type { OrderTypeConfig } from '../schemas/extraction-config';
 
+// Shared ZORN sales order fields (used by both standard and Italy variants)
+const zornSalesOrderFields: OrderTypeConfig['fields'] = [
+  {
+    key: 'poNumber',
+    label: 'PO Number',
+    type: 'string',
+    required: true,
+    description: 'Customer purchase order number. Fallback: use email subject line or email received date if missing.',
+  },
+  {
+    key: 'poDate',
+    label: 'PO Date',
+    type: 'date',
+    required: true,
+    description: 'Date the PO was issued by the customer (ISO 8601). Fallback: use email received date.',
+  },
+  {
+    key: 'requestedDeliveryDate',
+    label: 'Requested Delivery Date',
+    type: 'date',
+    required: false,
+    description: 'When the customer wants delivery (ISO 8601). Will be adjusted to valid shipment slot downstream.',
+  },
+  {
+    key: 'lineItems',
+    label: 'Line Items',
+    type: 'array',
+    required: true,
+    description: 'Array of objects with: materialId (Opple article/SKU code), quantity (number), unitPrice (number, optional), unit (string, optional)',
+  },
+  {
+    key: 'deliveryAddress',
+    label: 'Delivery Address',
+    type: 'address',
+    required: false,
+    description: 'Ship-to address if different from standard SAP ship-to. Include contact person and phone for direct delivery.',
+  },
+  {
+    key: 'quoteReference',
+    label: 'Quote Reference',
+    type: 'string',
+    required: false,
+    description: 'Quotation number if the customer references a specific quotation.',
+  },
+  {
+    key: 'deliveryNote',
+    label: 'Delivery Note / Customer Remarks',
+    type: 'string',
+    required: false,
+    description: 'Any special delivery instructions, customer remarks, or notes to copy into SAP text fields.',
+  },
+  {
+    key: 'contactPerson',
+    label: 'Contact Person',
+    type: 'string',
+    required: false,
+    description: 'Contact name at the delivery address (required for direct/dummy ship-to deliveries).',
+  },
+  {
+    key: 'contactPhone',
+    label: 'Contact Phone',
+    type: 'string',
+    required: false,
+    description: 'Phone number at the delivery address (required for direct/dummy ship-to deliveries).',
+  },
+];
+
 export const orderTypeConfigs: OrderTypeConfig[] = [
   {
-    orderType: 'sales_order',
-    label: 'Sales Order',
-    description: 'A customer order for products/services with quantities and prices',
-    fields: [
-      {
-        key: 'customerName',
-        label: 'Customer Name',
-        type: 'string',
-        required: true,
-        description: 'Full name or company name of the customer placing the order',
-      },
-      {
-        key: 'orderDate',
-        label: 'Order Date',
-        type: 'date',
-        required: true,
-        description: 'Date the order was placed (ISO 8601 format)',
-      },
-      {
-        key: 'deliveryDate',
-        label: 'Requested Delivery Date',
-        type: 'date',
-        required: false,
-        description: 'When the customer wants delivery (ISO 8601 format)',
-      },
-      {
-        key: 'lineItems',
-        label: 'Line Items',
-        type: 'array',
-        required: true,
-        description: 'Array of objects with: sku, description, quantity, unitPrice',
-      },
-      {
-        key: 'totalAmount',
-        label: 'Total Amount',
-        type: 'number',
-        required: false,
-        description: 'Total order value as a number',
-      },
-      {
-        key: 'shippingAddress',
-        label: 'Shipping Address',
-        type: 'address',
-        required: false,
-        description: 'Delivery address with street, city, state/province, postal code, country',
-      },
-      {
-        key: 'poNumber',
-        label: 'PO Number',
-        type: 'string',
-        required: false,
-        description: 'Customer purchase order reference number',
-      },
-    ],
+    orderType: 'sales_order_zorn',
+    label: 'Sales Order (ZORN)',
+    description: 'Standard customer sales order — creates SAP transaction ZORN. Price compared against SAP system price.',
+    fields: zornSalesOrderFields,
+  },
+  {
+    orderType: 'sales_order_zorn_italy',
+    label: 'Sales Order (ZORN Italy)',
+    description: 'Italian customer sales order — creates SAP transaction ZORN with special pricing. Customer price always used; SAP holds only minimum floor, no real price list.',
+    fields: zornSalesOrderFields,
   },
   {
     orderType: 'incoming_shipment',

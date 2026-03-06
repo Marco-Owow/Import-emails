@@ -4,6 +4,7 @@ import { PinoLogger } from '@mastra/loggers';
 import { PostgresStore } from '@mastra/pg';
 import { ingestWorkflow } from './workflows/ingest-workflow';
 import { parseWorkflow } from './workflows/parse-workflow';
+import { classifyWorkflow } from './workflows/classify-workflow';
 import { extractionAgent } from './agents/extraction-agent';
 
 const storage = new PostgresStore({
@@ -15,6 +16,7 @@ export const mastra = new Mastra({
   workflows: {
     ingestWorkflow,
     parseWorkflow,
+    classifyWorkflow,
   },
   agents: {
     extractionAgent,

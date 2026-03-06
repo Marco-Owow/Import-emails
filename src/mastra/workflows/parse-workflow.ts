@@ -16,7 +16,7 @@ const parseInputSchema = z.object({
 // Intermediate schema after email parsing
 const emailParsedSchema = z.object({
   orderId: z.string().uuid(),
-  messageId: z.string().uuid(),
+  emailId: z.string().uuid(),
   segments: z.array(z.object({
     type: z.enum(['plain', 'quote', 'forward_header', 'signature', 'greeting']),
     content: z.string(),
@@ -33,7 +33,7 @@ const emailParsedSchema = z.object({
 // After all attachments are parsed
 const attachmentsParsedSchema = z.object({
   orderId: z.string().uuid(),
-  messageId: z.string().uuid(),
+  emailId: z.string().uuid(),
   segments: emailParsedSchema.shape.segments,
   pdfs: z.array(z.object({
     attachmentId: z.string().uuid(),
@@ -78,19 +78,19 @@ const parseEmailBodyStep = createStep({
     const { orderId } = inputData;
     console.log(`Step: parse-email-body for order ${orderId}`);
 
-    // Update order status
-    await query('UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2', ['parsing', orderId]);
-
-    // Get the message ID for this order
-    const orderResult = await query('SELECT message_id FROM orders WHERE id = $1', [orderId]);
+    // Get the trigger email ID for this order
+    const orderResult = await query(
+      'SELECT trigger_email_id FROM orders WHERE id = $1',
+      [orderId],
+    );
     if (orderResult.rows.length === 0) {
       throw new Error(`Order not found: ${orderId}`);
     }
-    const messageId = orderResult.rows[0].message_id;
+    const emailId = orderResult.rows[0].trigger_email_id;
 
     // Parse email body
     const result = await parseEmailBodyTool.execute!(
-      { messageId },
+      { emailId },
       { mastra, requestContext: requestContext || new RequestContext() },
     );
 
@@ -98,10 +98,11 @@ const parseEmailBodyStep = createStep({
       throw new Error('Failed to parse email body: ' + result.error);
     }
 
-    // Get attachments for this message
+    // Get attachments for this email
     const attResult = await query(
-      'SELECT id, filename, mime_type FROM attachments WHERE message_id = $1 AND parse_status != $2',
-      [messageId, 'error'],
+      `SELECT id, file_name AS filename, mime_type FROM email_attachments
+       WHERE email_id = $1 AND parse_status != $2`,
+      [emailId, 'error'],
     );
 
     const attachmentIds = attResult.rows.map((r: any) => ({
@@ -114,7 +115,7 @@ const parseEmailBodyStep = createStep({
 
     return {
       orderId,
-      messageId,
+      emailId,
       segments: result.segments,
       attachmentIds,
     };
@@ -128,7 +129,7 @@ const parseAttachmentsStep = createStep({
   inputSchema: emailParsedSchema,
   outputSchema: attachmentsParsedSchema,
   execute: async ({ inputData, mastra, requestContext }) => {
-    const { orderId, messageId, segments, attachmentIds } = inputData;
+    const { orderId, emailId, segments, attachmentIds } = inputData;
     console.log(`Step: parse-attachments for order ${orderId}`);
 
     const pdfs: PdfEvidence[] = [];
@@ -174,9 +175,8 @@ const parseAttachmentsStep = createStep({
       } catch (error) {
         const msg = error instanceof Error ? error.message : 'Unknown error';
         errors.push(`${att.filename}: ${msg}`);
-        // Mark attachment as error
         await query(
-          'UPDATE attachments SET parse_status = $1, parse_error = $2 WHERE id = $3',
+          'UPDATE email_attachments SET parse_status = $1, parse_error = $2 WHERE id = $3',
           ['error', msg, att.id],
         );
       }
@@ -184,7 +184,7 @@ const parseAttachmentsStep = createStep({
 
     console.log(`Attachments parsed: ${pdfs.length} PDFs, ${excels.length} Excel files, ${errors.length} errors`);
 
-    return { orderId, messageId, segments, pdfs, excels, errors };
+    return { orderId, emailId, segments, pdfs, excels, errors };
   },
 });
 
@@ -200,7 +200,6 @@ const assembleEvidencePackStep = createStep({
 
     const evidencePackId = randomUUID();
 
-    // Compute parse quality: start at 1.0, subtract per error
     const errorPenalty = 0.15;
     const score = Math.max(0, 1.0 - errors.length * errorPenalty);
     const parseQuality = { score, errors };
@@ -214,28 +213,27 @@ const assembleEvidencePackStep = createStep({
       parseQuality,
     };
 
-    // Validate against schema
     evidencePackSchema.parse(evidencePack);
 
-    // Store in Postgres
+    // Store evidence pack (internal Mastra processing table)
     await query(
       'INSERT INTO evidence_packs (id, order_id, data) VALUES ($1, $2, $3)',
       [evidencePackId, orderId, JSON.stringify(evidencePack)],
     );
 
-    // Update order
+    // Update order to stable checkpoint — 'extracted' covers parse + extract phases
     await query(
-      'UPDATE orders SET status = $1, evidence_pack_id = $2, updated_at = NOW() WHERE id = $3',
-      ['parsed', evidencePackId, orderId],
+      'UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2',
+      ['extracted', orderId],
     );
 
-    // Audit event
+    // Audit log
     await query(
-      'INSERT INTO audit_events (id, order_id, event_type, payload) VALUES ($1, $2, $3, $4)',
+      `INSERT INTO audit_logs (id, order_id, user_id, action, old_value, new_value, metadata, created_at, updated_at)
+       VALUES ($1, $2, NULL, 'status_change', 'ingested', 'extracted', $3, NOW(), NOW())`,
       [
         randomUUID(),
         orderId,
-        'evidence_pack_created',
         JSON.stringify({
           evidencePackId,
           emailSegments: segments.length,

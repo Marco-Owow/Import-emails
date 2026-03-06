@@ -145,29 +145,30 @@ export const parseEmailBodyTool = createTool({
   id: 'parse-email-body-tool',
   description: 'Segments an email body into structured parts: plain text, quotes, forwards, signatures',
   inputSchema: z.object({
-    messageId: z.string().uuid().describe('ID of the message to parse'),
+    emailId: z.string().uuid().describe('ID of the email (emails table PK) to parse'),
   }),
   outputSchema: z.object({
     segments: z.array(emailSegmentSchema),
     segmentCount: z.number(),
   }),
   execute: async (inputData) => {
-    const { messageId } = inputData;
+    const { emailId } = inputData;
 
-    // Load message from DB
+    // Load email body from inbound_emails detail table
     const result = await query(
-      'SELECT body, body_type FROM messages WHERE id = $1',
-      [messageId],
+      'SELECT body_html FROM inbound_emails WHERE email_id = $1',
+      [emailId],
     );
 
     if (result.rows.length === 0) {
-      throw new Error(`Message not found: ${messageId}`);
+      throw new Error(`Inbound email not found for email_id: ${emailId}`);
     }
 
-    const { body, body_type } = result.rows[0];
-    const segments = segmentEmailBody(body, body_type);
+    const { body_html } = result.rows[0];
+    const bodyContent = body_html ?? '';
+    const segments = segmentEmailBody(bodyContent, body_html ? 'html' : 'text');
 
-    console.log(`Parsed email ${messageId}: ${segments.length} segments (${segments.map(s => s.type).join(', ')})`);
+    console.log(`Parsed email ${emailId}: ${segments.length} segments (${segments.map(s => s.type).join(', ')})`);
 
     return { segments, segmentCount: segments.length };
   },

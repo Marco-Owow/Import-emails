@@ -56,7 +56,7 @@ export const storeMessageTool = createTool({
     mailbox: z.string().email(),
   }),
   outputSchema: z.object({
-    messageId: z.string().uuid(),
+    emailId: z.string().uuid(),
     attachmentIds: z.array(z.string().uuid()),
     orderId: z.string().uuid(),
     skipped: z.boolean().describe('True if message was already ingested'),
@@ -67,56 +67,67 @@ export const storeMessageTool = createTool({
     // Idempotency: hash the external email ID
     const contentHash = sha256(email.id);
 
-    // Check if already stored
+    // Resolve organization — use DEFAULT_ORG_ID from env (set by seed script)
+    const organizationId = process.env.DEFAULT_ORG_ID;
+    if (!organizationId) {
+      throw new Error('DEFAULT_ORG_ID env var not set. Run db:seed first.');
+    }
+
+    // Check if already stored (idempotency via content_hash on email_attachments or emails external_id)
     const existing = await query(
-      'SELECT id FROM messages WHERE content_hash = $1',
-      [contentHash],
+      'SELECT id FROM emails WHERE external_id = $1',
+      [email.id],
     );
 
     if (existing.rows.length > 0) {
-      const msgId = existing.rows[0].id;
-      // Find existing order
-      const orderRow = await query('SELECT id FROM orders WHERE message_id = $1', [msgId]);
-      const attRows = await query('SELECT id FROM attachments WHERE message_id = $1', [msgId]);
-      console.log(`Message already ingested (hash: ${contentHash.slice(0, 8)}...), skipping.`);
+      const emailId = existing.rows[0].id;
+      const orderRow = await query('SELECT id FROM orders WHERE trigger_email_id = $1', [emailId]);
+      const attRows = await query('SELECT id FROM email_attachments WHERE email_id = $1', [emailId]);
+      console.log(`Email already ingested (externalId: ${email.id.slice(0, 16)}...), skipping.`);
       return {
-        messageId: msgId,
+        emailId,
         attachmentIds: attRows.rows.map((r: any) => r.id),
         orderId: orderRow.rows[0]?.id || '',
         skipped: true,
       };
     }
 
-    const messageId = randomUUID();
+    const emailId = randomUUID();
     const now = new Date().toISOString();
 
-    // Store message
+    // Insert base email record
     await query(
-      `INSERT INTO messages (id, external_id, mailbox, "from", "to", cc, subject, body, body_type, thread_id, received_at, content_hash)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      `INSERT INTO emails (id, type, system_connection_id, thread_id, subject, external_id, created_at, updated_at)
+       VALUES ($1, 'inbound', NULL, $2, $3, $4, $5, $5)`,
       [
-        messageId,
-        email.id,
-        mailbox,
-        email.from,
-        email.toRecipients,
-        email.ccRecipients,
-        email.subject,
-        email.body,
-        email.bodyType,
+        emailId,
         email.conversationId || null,
-        email.receivedDateTime,
-        contentHash,
+        email.subject,
+        email.id,
+        now,
       ],
     );
 
-    console.log(`Stored message ${messageId} (subject: "${email.subject}")`);
+    // Insert inbound_emails detail record
+    const inboundEmailId = randomUUID();
+    await query(
+      `INSERT INTO inbound_emails (id, email_id, sender, body_html, body_markdown, received_at)
+       VALUES ($1, $2, $3, $4, NULL, $5)`,
+      [
+        inboundEmailId,
+        emailId,
+        email.from,
+        email.bodyType === 'html' ? email.body : null,
+        email.receivedDateTime,
+      ],
+    );
+
+    console.log(`Stored email ${emailId} (subject: "${email.subject}")`);
 
     // Download and store attachments
     const attachmentIds: string[] = [];
 
     if (email.hasAttachments && email.attachments.length > 0) {
-      // Ensure attachments dir exists
       fs.mkdirSync(ATTACHMENTS_DIR, { recursive: true });
 
       const client = getGraphClient();
@@ -126,10 +137,9 @@ export const storeMessageTool = createTool({
         let parseStatus = 'pending';
         let parseError: string | null = null;
         let storagePath = '';
-        let attachmentContentHash = '';
+        let contentHashAtt = '';
 
         try {
-          // Download attachment content from Graph
           const attData = await client
             .api(`/users/${mailbox}/messages/${email.id}/attachments/${att.id}`)
             .get();
@@ -138,9 +148,8 @@ export const storeMessageTool = createTool({
             ? Buffer.from(attData.contentBytes, 'base64')
             : Buffer.alloc(0);
 
-          attachmentContentHash = sha256(contentBytes);
+          contentHashAtt = sha256(contentBytes);
 
-          // Save to disk
           const ext = path.extname(att.name) || '';
           const safeFilename = `${attachmentId}${ext}`;
           storagePath = path.join(ATTACHMENTS_DIR, safeFilename);
@@ -151,30 +160,24 @@ export const storeMessageTool = createTool({
           parseStatus = 'error';
           parseError = error instanceof Error ? error.message : 'Failed to download attachment';
           storagePath = '';
-          attachmentContentHash = sha256(att.id);
+          contentHashAtt = sha256(att.id);
           console.error(`  Failed to download attachment ${att.name}: ${parseError}`);
         }
 
-        // Determine page/sheet count hints from mime type
-        const isPdf = att.contentType === 'application/pdf';
-        const isExcel = att.contentType.includes('spreadsheet') ||
-          att.contentType.includes('excel') ||
-          att.name.endsWith('.xlsx') ||
-          att.name.endsWith('.xls');
-
         await query(
-          `INSERT INTO attachments (id, message_id, filename, mime_type, size_bytes, content_hash, storage_path, parse_status, parse_error)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          `INSERT INTO email_attachments (id, email_id, file_name, mime_type, size, storage_path, content_hash, parse_status, parse_error, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)`,
           [
             attachmentId,
-            messageId,
+            emailId,
             att.name,
             att.contentType,
             att.size,
-            attachmentContentHash,
             storagePath,
+            contentHashAtt,
             parseStatus,
             parseError,
+            now,
           ],
         );
 
@@ -185,29 +188,33 @@ export const storeMessageTool = createTool({
     // Create Order
     const orderId = randomUUID();
     await query(
-      `INSERT INTO orders (id, message_id, status, created_at, updated_at)
-       VALUES ($1, $2, 'new', $3, $3)`,
-      [orderId, messageId, now],
+      `INSERT INTO orders (id, organization_id, trigger_email_id, status, created_at, updated_at)
+       VALUES ($1, $2, $3, 'ingested', $4, $4)`,
+      [orderId, organizationId, emailId, now],
     );
 
-    // Audit event
+    // Update emails.order_id back-reference
+    await query('UPDATE emails SET order_id = $1, updated_at = NOW() WHERE id = $2', [orderId, emailId]);
+
+    // Audit log
     await query(
-      `INSERT INTO audit_events (id, order_id, event_type, payload)
-       VALUES ($1, $2, 'order_created', $3)`,
+      `INSERT INTO audit_logs (id, order_id, user_id, action, new_value, metadata, created_at, updated_at)
+       VALUES ($1, $2, NULL, 'status_change', 'ingested', $3, $4, $4)`,
       [
         randomUUID(),
         orderId,
         JSON.stringify({
-          messageId,
+          emailId,
           attachmentCount: attachmentIds.length,
           subject: email.subject,
-          from: email.from,
+          sender: email.from,
         }),
+        now,
       ],
     );
 
-    console.log(`Created order ${orderId} (status: new, attachments: ${attachmentIds.length})`);
+    console.log(`Created order ${orderId} (status: ingested, attachments: ${attachmentIds.length})`);
 
-    return { messageId, attachmentIds, orderId, skipped: false };
+    return { emailId, attachmentIds, orderId, skipped: false };
   },
 });

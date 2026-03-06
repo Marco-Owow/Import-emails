@@ -94,12 +94,7 @@ export const extractFieldsTool = createTool({
     }
     const evidencePack: EvidencePack = epResult.rows[0].data;
 
-    // Update order status
-    await query('UPDATE orders SET status = $1, order_type = $2, updated_at = NOW() WHERE id = $3', [
-      'extracting',
-      orderType,
-      orderId,
-    ]);
+    // No intermediate status written to DB — Mastra tracks extraction state internally
 
     // Build the prompt
     const evidenceText = formatEvidenceForPrompt(evidencePack);
@@ -133,20 +128,20 @@ Respond ONLY with valid JSON matching the extractionResult schema.`;
     const result = response.object;
 
     // Store result in orders
-    await query('UPDATE orders SET extracted_fields = $1, status = $2, updated_at = NOW() WHERE id = $3', [
+    await query('UPDATE orders SET extracted_data = $1, status = $2, updated_at = NOW() WHERE id = $3', [
       JSON.stringify(result),
       'extracted',
       orderId,
     ]);
 
-    // Audit event
+    // Audit log
     const { randomUUID } = await import('crypto');
     await query(
-      'INSERT INTO audit_events (id, order_id, event_type, payload) VALUES ($1, $2, $3, $4)',
+      `INSERT INTO audit_logs (id, order_id, user_id, action, field_path, new_value, metadata, created_at, updated_at)
+       VALUES ($1, $2, NULL, 'field_edit', 'extractedData', NULL, $3, NOW(), NOW())`,
       [
         randomUUID(),
         orderId,
-        'fields_extracted',
         JSON.stringify({
           orderType,
           fieldCount: result.fields.length,
